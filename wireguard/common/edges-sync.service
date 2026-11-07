@@ -1,5 +1,5 @@
 [Unit]
-Description=edges: pull signed config from git and apply it
+Description=edges: pull config from git and apply it
 Wants=network-online.target
 After=network-online.target
 

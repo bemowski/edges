@@ -16,7 +16,7 @@ echo ok
 """
 
 [tasks.sync]
-description = "Pull signed changes and apply them now"
+description = "Pull changes and apply them now"
 run = "sudo systemctl start edges-sync && journalctl -u edges-sync -n 20 --no-pager"
 
 [tasks.status]
