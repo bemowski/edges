@@ -13,8 +13,7 @@ table inet edges_wg {
 		type filter hook input priority filter; policy accept;
 		iifname != { "wg0", "wg1" } accept
 		ct state established,related accept
-		ip saddr @nets icmp type echo-request accept
-		ip saddr @nets tcp dport 22 accept
+		ip saddr @nets accept
 		drop
 	}
 
