@@ -1,22 +1,21 @@
 #!/bin/sh
 # Install edges WireGuard on a controller. Run as bemo (uses sudo); idempotent.
 #   wireguard/install.sh <controller>      e.g. controller.f
-# Needs ~/.ssh/crypt.key.<controller>, copied from the workstation: this host's key only.
+# Needs /etc/edges/wg.key, this box's own WireGuard key: run `wggen enroll <controller> <ssh-host>` in mono first.
 # The old (pre-edges) WireGuard setup is stopped and moved aside first: see teardown-legacy.sh.
 set -e
 HOST=${1:?usage: $0 <controller>}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 COMMON=$REPO/wireguard/common
-KEY=$HOME/.ssh/crypt.key.$HOST
 
 [ -d "$REPO/wireguard/hosts/$HOST" ] || { echo "no generated config for $HOST" >&2; exit 1; }
-[ -f "$KEY" ] || { echo "$KEY is missing: copy it from the workstation" >&2; exit 1; }
+sudo test -s /etc/edges/wg.key || {
+    echo "/etc/edges/wg.key is missing: run \`wggen enroll $HOST <ssh-host>\` from the workstation" >&2; exit 1; }
 
-sudo apt-get install -y wireguard-tools nftables gpg git python3 iputils-ping
+sudo apt-get install -y wireguard-tools nftables git python3 iputils-ping
 
 sudo install -d -m 755 /etc/edges
 echo "$HOST" | sudo tee /etc/edges/host >/dev/null
-sudo install -m 600 -o root -g root "$KEY" /etc/edges/crypt.key
 for unit in edges-sync.service edges-sync.timer edges-wg-reresolve.service edges-wg-reresolve.timer; do
     sed "s#@REPO@#$REPO#g" "$COMMON/$unit" | sudo tee "/etc/systemd/system/$unit" >/dev/null
 done

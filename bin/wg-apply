@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Apply this host's generated WireGuard config from the edges repo.
 
-Decrypts wireguard/hosts/<host>/*.asc with /etc/edges/crypt.key, in memory, and installs each
-file that differs from what is on the system:
+Reads wireguard/hosts/<host>/ (plaintext: public data only) and installs each file that differs
+from what is on the system:
   edges-wg.nft  -> /etc/edges/edges-wg.nft, checked with `nft -c`, then loaded
   <iface>.conf  -> /etc/wireguard/<iface>.conf, checked with `wg-quick strip`, then
                    `wg syncconf` if only [Peer] sections changed, else restart wg-quick@<iface>
+The private key is this box's own /etc/edges/wg.key (made by mono `wggen enroll`); the confs load
+it in PostUp, and it is set again after every `wg syncconf` (which would otherwise clear it).
 Interfaces this script installed before but that are no longer generated are stopped and removed.
 The previous version of each changed file is kept in /etc/wireguard/.edges-prev/.
 
@@ -18,11 +20,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "bin"))
-
-from pylib import crypt  # noqa: E402
-
 NFT = "edges-wg.nft"
+KEY = "etc/edges/wg.key"
 
 
 def parse_args():
@@ -31,17 +30,16 @@ def parse_args():
     p.add_argument("--root", type=Path, default=Path("/"),
                    help="install under this root and run no commands (dry run)")
     p.add_argument("--host", help="host name (default: from <root>/etc/edges/host)")
-    p.add_argument("--key", type=Path, help="crypt key (default: <root>/etc/edges/crypt.key)")
     return p.parse_args()
 
 
 class Applier:
-    def __init__(self, root, host, key):
+    def __init__(self, root, host):
         self.dry = root != Path("/")
         self.edges = root / "etc/edges"
         self.wg = root / "etc/wireguard"
         self.host = host or (self.edges / "host").read_text().strip()
-        self.key = key or self.edges / "crypt.key"
+        self.key = root / KEY
         self.src = REPO / "wireguard/hosts" / self.host
         self.managed_file = self.edges / "managed"
 
@@ -69,8 +67,8 @@ class Applier:
     def rendered(self):
         if not self.src.is_dir():
             raise RuntimeError(f"{self.src} does not exist: is {self.host} in topology.yaml?")
-        return {f.name.removesuffix(".asc"): crypt.decrypt(f.read_bytes(), self.key).decode()
-                for f in sorted(self.src.glob("*.asc"))}
+        return {f.name: f.read_text() for f in sorted(self.src.iterdir())
+                if f.is_file() and (f.name == NFT or f.suffix == ".conf")}
 
     def apply_nft(self, text):
         path = self.edges / NFT
@@ -101,6 +99,7 @@ class Applier:
         if old and interface_section(old) == interface_section(text) and self.active(iface):
             self.run("wg", "syncconf", iface, "/dev/stdin",
                      input=self.run("wg-quick", "strip", iface))
+            self.run("wg", "set", iface, "private-key", "/" + KEY)
             print(f"{iface}: peers synced")
         else:
             self.run("systemctl", "enable", f"wg-quick@{iface}")
@@ -115,6 +114,9 @@ class Applier:
         print(f"{iface}: no longer generated, removed")
 
     def apply(self):
+        if not self.key.is_file() or not self.key.stat().st_size:
+            raise RuntimeError(f"{self.key} is missing: run `wggen enroll {self.host} <ssh-host>` "
+                               "from the workstation")
         files = self.rendered()
         self.apply_nft(files.pop(NFT))
         confs = {name.removesuffix(".conf"): text for name, text in files.items()}
@@ -134,8 +136,8 @@ def main():
     args = parse_args()
     root = args.root.resolve()
     try:
-        Applier(root, args.host, args.key).apply()
-    except (RuntimeError, OSError, crypt.CryptError) as e:
+        Applier(root, args.host).apply()
+    except (RuntimeError, OSError) as e:
         sys.exit(f"wg-apply: {e}")
 
 

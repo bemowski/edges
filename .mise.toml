@@ -11,7 +11,7 @@ description = "Syntax-check every script and dry-run wg-apply"
 run = """
 set -e
 for f in bin/edges-sync bin/wg-check wireguard/*.sh; do sh -n "$f"; done
-python3 -m py_compile bin/wg-apply bin/wg-reresolve bin/encrypt bin/decrypt bin/pylib/crypt.py
+python3 -m py_compile bin/wg-apply bin/wg-reresolve
 echo ok
 """
 

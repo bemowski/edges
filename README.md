@@ -5,16 +5,17 @@ The design and the network topology live in mono, under `systems/net/wireguard/e
 
 ## Bootstrap a controller (once)
 
-From the workstation, copy that controller's own crypt key (never another host's):
+On the workstation, in mono `systems/net/wireguard`: have the controller make its own WireGuard key
+(`/etc/edges/wg.key`, never leaves the box; asks for its sudo password) and record the public key:
 
 ```sh
-scp ~/.ssh/crypt.key.controller.f bemo@<controller>:.ssh/
+wggen enroll controller.f <ssh-host>     # writes keys/controller.f.pub; commit it
+wggen check && wggen push
 ```
 
 On the controller, as bemo (it needs read access to the private GitHub repo):
 
 ```sh
-chmod 600 ~/.ssh/crypt.key.controller.f
 mkdir -p ~/gitroot && git clone git@github.com:bemowski/edges.git ~/gitroot/edges
 ~/gitroot/edges/wireguard/install.sh controller.f
 ```

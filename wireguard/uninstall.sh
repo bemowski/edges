@@ -1,7 +1,8 @@
 #!/bin/sh
 # Undo install.sh: stop the timers and the edges interfaces, remove what was installed.
 # The pre-edges setup is not restored; its files are in /root/wireguard.pre-edges-*/.
-# Run as bemo (uses sudo).
+# /etc/edges/wg.key (this node's identity, enrolled in mono keys/) is kept, so a reinstall reuses it;
+# remove it by hand to retire the node. Run as bemo (uses sudo).
 set -e
 sudo systemctl disable --now edges-sync.timer edges-wg-reresolve.timer 2>/dev/null || true
 for iface in $(sudo cat /etc/edges/managed 2>/dev/null); do
@@ -15,4 +16,4 @@ for unit in edges-sync.service edges-sync.timer edges-wg-reresolve.service edges
 done
 sudo systemctl daemon-reload
 sudo rm -f /etc/sysctl.d/99-edges-wg.conf
-sudo rm -rf /etc/edges
+sudo find /etc/edges -mindepth 1 -maxdepth 1 ! -name wg.key -exec rm -rf {} + 2>/dev/null || true

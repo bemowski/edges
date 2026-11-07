@@ -1,6 +1,8 @@
-# Plaintext secrets never land in this repo: only encrypted *.asc files under wireguard/hosts/.
+# No private keys in this repo: each box's key lives only in /etc/edges/wg.key.
+# wireguard/hosts/ holds generated public config (no keys), so its confs are tracked.
 *.conf
 !wireguard/common/*.conf
+!wireguard/hosts/*/*.conf
 *.key
 *.key.*
 crypt.key*
