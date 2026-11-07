@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Re-resolve DDNS endpoints of peers whose handshake has gone stale.
+
+wg resolves an Endpoint hostname once, when the interface comes up. If a site's public IP
+changes, the tunnel stays dead until restarted. edges-wg-reresolve.timer runs this as root.
+"""
+import subprocess
+import time
+from pathlib import Path
+
+MARKER = "# edges: generated"
+STALE = 135  # seconds: a little over two handshake intervals
+
+
+def peers(conf):
+    """Yield (public key, endpoint) for each peer with an Endpoint."""
+    public = endpoint = None
+    for line in conf.read_text().splitlines() + ["[Peer]"]:
+        line = line.strip()
+        if line == "[Peer]":
+            if public and endpoint:
+                yield public, endpoint
+            public = endpoint = None
+        elif "=" in line:
+            key, value = (s.strip() for s in line.split("=", 1))
+            if key == "PublicKey":
+                public = value
+            elif key == "Endpoint":
+                endpoint = value
+
+
+def main():
+    now = time.time()
+    for conf in sorted(Path("/etc/wireguard").glob("*.conf")):
+        if not conf.read_text().startswith(MARKER):
+            continue
+        iface = conf.stem
+        result = subprocess.run(["wg", "show", iface, "latest-handshakes"],
+                                capture_output=True, text=True)
+        if result.returncode:
+            continue  # interface is down
+        handshakes = dict(line.split("\t") for line in result.stdout.splitlines())
+        for public, endpoint in peers(conf):
+            if now - int(handshakes.get(public, 0)) > STALE:
+                subprocess.run(["wg", "set", iface, "peer", public, "endpoint", endpoint])
+
+
+if __name__ == "__main__":
+    main()

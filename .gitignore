@@ -1,0 +1,8 @@
+# Plaintext secrets never land in this repo: only encrypted *.asc files under wireguard/hosts/.
+*.conf
+!wireguard/common/*.conf
+*.key
+*.key.*
+crypt.key*
+*.psk
+__pycache__/

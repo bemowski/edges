@@ -1,0 +1,8 @@
+[Unit]
+Description=edges: pull signed config from git and apply it
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/bin/edges-sync

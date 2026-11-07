@@ -1,0 +1,6 @@
+[Unit]
+Description=edges: re-resolve stale WireGuard DDNS endpoints
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/bin/wg-reresolve

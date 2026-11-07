@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Apply this host's generated WireGuard config from the edges repo.
+
+Decrypts wireguard/hosts/<host>/*.asc with /etc/edges/crypt.key, in memory, and installs each
+file that differs from what is on the system:
+  edges-wg.nft  -> /etc/edges/edges-wg.nft, checked with `nft -c`, then loaded
+  <iface>.conf  -> /etc/wireguard/<iface>.conf, checked with `wg-quick strip`, then
+                   `wg syncconf` if only [Peer] sections changed, else restart wg-quick@<iface>
+Interfaces this script installed before but that are no longer generated are stopped and removed.
+The previous version of each changed file is kept in /etc/wireguard/.edges-prev/.
+
+Run as root (edges-sync does, every few minutes). --root DIR writes under DIR and runs nothing.
+"""
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "bin"))
+
+from pylib import crypt  # noqa: E402
+
+NFT = "edges-wg.nft"
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--root", type=Path, default=Path("/"),
+                   help="install under this root and run no commands (dry run)")
+    p.add_argument("--host", help="host name (default: from <root>/etc/edges/host)")
+    p.add_argument("--key", type=Path, help="crypt key (default: <root>/etc/edges/crypt.key)")
+    return p.parse_args()
+
+
+class Applier:
+    def __init__(self, root, host, key):
+        self.dry = root != Path("/")
+        self.edges = root / "etc/edges"
+        self.wg = root / "etc/wireguard"
+        self.host = host or (self.edges / "host").read_text().strip()
+        self.key = key or self.edges / "crypt.key"
+        self.src = REPO / "wireguard/hosts" / self.host
+        self.managed_file = self.edges / "managed"
+
+    def run(self, *cmd, input=None, check=True):
+        if self.dry:
+            print("would run:", " ".join(cmd))
+            return ""
+        result = subprocess.run(cmd, input=input, capture_output=True, text=True)
+        if check and result.returncode:
+            raise RuntimeError(f"{' '.join(cmd)}: {result.stderr.strip()}")
+        return result.stdout
+
+    def write(self, path, text):
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = path.with_name(path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        tmp.replace(path)
+
+    def backup(self, path):
+        if path.exists():
+            self.write(self.wg / ".edges-prev" / path.name, path.read_text())
+
+    def rendered(self):
+        if not self.src.is_dir():
+            raise RuntimeError(f"{self.src} does not exist: is {self.host} in topology.yaml?")
+        return {f.name.removesuffix(".asc"): crypt.decrypt(f.read_bytes(), self.key).decode()
+                for f in sorted(self.src.glob("*.asc"))}
+
+    def apply_nft(self, text):
+        path = self.edges / NFT
+        if path.exists() and path.read_text() == text:
+            return
+        self.run("nft", "-c", "-f", "/dev/stdin", input=text)
+        self.write(path, text)
+        self.run("nft", "-f", str(path))
+        print(f"loaded {path}")
+
+    def active(self, iface):
+        return not self.dry and subprocess.run(
+            ["systemctl", "is-active", "--quiet", f"wg-quick@{iface}"]).returncode == 0
+
+    def apply_conf(self, iface, text):
+        path = self.wg / f"{iface}.conf"
+        old = path.read_text() if path.exists() else None
+        if old == text:
+            if not self.dry and not self.active(iface):
+                self.run("systemctl", "enable", "--now", f"wg-quick@{iface}")
+                print(f"{iface}: unchanged, started")
+            return
+        staged = self.wg / ".edges-staging" / f"{iface}.conf"
+        self.write(staged, text)
+        self.run("wg-quick", "strip", str(staged))
+        self.backup(path)
+        staged.replace(path)
+        if old and interface_section(old) == interface_section(text) and self.active(iface):
+            self.run("wg", "syncconf", iface, "/dev/stdin",
+                     input=self.run("wg-quick", "strip", iface))
+            print(f"{iface}: peers synced")
+        else:
+            self.run("systemctl", "enable", f"wg-quick@{iface}")
+            self.run("systemctl", "restart", f"wg-quick@{iface}")
+            print(f"{iface}: {'restarted' if old else 'started'}")
+
+    def remove(self, iface):
+        path = self.wg / f"{iface}.conf"
+        self.run("systemctl", "disable", "--now", f"wg-quick@{iface}", check=False)
+        self.backup(path)
+        path.unlink(missing_ok=True)
+        print(f"{iface}: no longer generated, removed")
+
+    def apply(self):
+        files = self.rendered()
+        self.apply_nft(files.pop(NFT))
+        confs = {name.removesuffix(".conf"): text for name, text in files.items()}
+        for iface, text in confs.items():
+            self.apply_conf(iface, text)
+        managed = set(self.managed_file.read_text().split()) if self.managed_file.exists() else set()
+        for iface in sorted(managed - confs.keys()):
+            self.remove(iface)
+        self.write(self.managed_file, "\n".join(sorted(confs)) + "\n")
+
+
+def interface_section(text):
+    return text.split("\n[Peer]", 1)[0]
+
+
+def main():
+    args = parse_args()
+    root = args.root.resolve()
+    try:
+        Applier(root, args.host, args.key).apply()
+    except (RuntimeError, OSError, crypt.CryptError) as e:
+        sys.exit(f"wg-apply: {e}")
+
+
+if __name__ == "__main__":
+    main()

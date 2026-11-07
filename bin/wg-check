@@ -1,0 +1,26 @@
+#!/bin/sh
+# Health check for this host: handshake age per peer, then ping every peer's /32 and the .1
+# gateway of every LAN it carries. Run with sudo.
+set -u
+now=$(date +%s)
+for iface in $(wg show interfaces); do
+    echo "== $iface"
+    wg show "$iface" latest-handshakes | while read -r peer ts; do
+        if [ "$ts" = 0 ]; then age=never; else age="$((now - ts))s ago"; fi
+        echo "  handshake $age  $peer"
+    done
+done
+
+echo "== ping"
+wg show all allowed-ips | tr ' \t' '\n\n' | grep / | sort -u | while read -r prefix; do
+    case $prefix in
+        */32) target=${prefix%/32} ;;
+        */24) target=${prefix%.*/24}.1 ;;
+        *) continue ;;
+    esac
+    if ping -c 1 -W 2 "$target" >/dev/null 2>&1; then
+        echo "  ok    $target  ($prefix)"
+    else
+        echo "  FAIL  $target  ($prefix)"
+    fi
+done

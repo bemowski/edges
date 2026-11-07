@@ -1,0 +1,24 @@
+# Optional on the controllers: every script runs without mise.
+
+[tools]
+python = "3.12"
+
+[env]
+_.path = ["{{config_root}}/bin"]
+
+[tasks.check]
+description = "Syntax-check every script and dry-run wg-apply"
+run = """
+set -e
+for f in bin/edges-sync bin/wg-check wireguard/*.sh; do sh -n "$f"; done
+python3 -m py_compile bin/wg-apply bin/wg-reresolve bin/encrypt bin/decrypt bin/pylib/crypt.py
+echo ok
+"""
+
+[tasks.sync]
+description = "Pull signed changes and apply them now"
+run = "sudo systemctl start edges-sync && journalctl -u edges-sync -n 20 --no-pager"
+
+[tasks.status]
+description = "Handshakes and reachability for this host"
+run = "sudo bin/wg-check"

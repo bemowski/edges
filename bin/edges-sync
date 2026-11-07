@@ -1,0 +1,36 @@
+#!/bin/sh
+# GitOps poller (edges-sync.timer runs it as root every 5 minutes).
+# Fast-forwards this checkout to origin/main, but only if every new commit is signed by a key
+# in /etc/edges/allowed_signers, then applies this host's config with wg-apply.
+# git runs as the checkout's owner (bemo), so the deploy key in ~bemo/.ssh is used.
+set -eu
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+OWNER=$(stat -c %U "$REPO")
+SIGNERS=${EDGES_SIGNERS:-/etc/edges/allowed_signers}
+
+g() {
+    if [ "$(id -un)" = "$OWNER" ]; then
+        git -C "$REPO" -c gpg.ssh.allowedSignersFile="$SIGNERS" "$@"
+    else
+        runuser -u "$OWNER" -- git -C "$REPO" -c gpg.ssh.allowedSignersFile="$SIGNERS" "$@"
+    fi
+}
+
+g fetch -q origin main
+HEAD=$(g rev-parse HEAD)
+NEW=$(g rev-parse origin/main)
+if [ "$HEAD" != "$NEW" ]; then
+    if ! g merge-base --is-ancestor HEAD origin/main; then
+        echo "edges-sync: origin/main ($NEW) is not a fast-forward of $HEAD; refusing" >&2
+        exit 1
+    fi
+    for c in $(g rev-list HEAD..origin/main); do
+        if ! g verify-commit "$c" >/dev/null 2>&1; then
+            echo "edges-sync: $c is not signed by an allowed signer; refusing" >&2
+            exit 1
+        fi
+    done
+    g merge -q --ff-only origin/main
+    echo "edges-sync: $HEAD -> $NEW"
+fi
+exec "$REPO/bin/wg-apply"
