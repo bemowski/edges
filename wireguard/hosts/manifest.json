@@ -2,7 +2,7 @@
   "source": {
     "repo": "mono",
     "path": "systems/net/wireguard",
-    "commit": "f297a8994be3f023027e491d2ae8acb5ec9dc95b",
+    "commit": "d1cc7dd848ddd3c402e416c58372c1602f8f294e",
     "dirty": false
   }
 }

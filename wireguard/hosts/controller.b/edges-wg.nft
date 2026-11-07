@@ -6,12 +6,12 @@ table inet edges_wg {
 	set nets {
 		type ipv4_addr
 		flags interval
-		elements = { 192.168.8.0/24, 192.168.20.0/24, 192.168.23.0/24, 192.168.30.0/24, 192.168.34.0/24, 192.168.40.0/24, 192.168.200.0/23 }
+		elements = { 192.168.8.0/24, 192.168.20.0/24, 192.168.23.0/24, 192.168.30.0/24, 192.168.34.0/24, 192.168.40.0/24, 192.168.200.0/24 }
 	}
 
 	chain input {
 		type filter hook input priority filter; policy accept;
-		iifname != { "wg0", "wg1" } accept
+		iifname != { "wg0" } accept
 		ct state established,related accept
 		ip saddr @nets accept
 		drop
@@ -19,9 +19,9 @@ table inet edges_wg {
 
 	chain forward {
 		type filter hook forward priority filter; policy accept;
-		iifname { "wg0", "wg1" } ip saddr @nets ip daddr @nets accept
-		oifname { "wg0", "wg1" } ip saddr @nets ip daddr @nets accept
-		iifname { "wg0", "wg1" } drop
-		oifname { "wg0", "wg1" } drop
+		iifname { "wg0" } ip saddr @nets ip daddr @nets accept
+		oifname { "wg0" } ip saddr @nets ip daddr @nets accept
+		iifname { "wg0" } drop
+		oifname { "wg0" } drop
 	}
 }
